@@ -1,4 +1,5 @@
-import { useState, type FormEvent } from "react";
+import { useState } from "react";
+import { useForm } from "react-hook-form";
 import { Link, Navigate, useNavigate } from "react-router-dom";
 import AuthLayout from "../components/AuthLayout";
 import { PasswordField, SelectField, TextField } from "../components/TextField";
@@ -24,45 +25,60 @@ function passwordStrength(pw: string): { score: number; label: string } {
 
 const meterColors = ["bg-line", "bg-danger", "bg-sun", "bg-mint", "bg-mint-dark"];
 
-type Errors = Partial<Record<"schoolName" | "schoolType" | "adminName" | "email" | "password" | "terms", string>>;
+interface SignupFormValues {
+  schoolName: string;
+  schoolType: SchoolType | "";
+  firstName: string;
+  lastName: string;
+  email: string;
+  password: string;
+  terms: boolean;
+}
 
 export default function Signup() {
   const { account, signUp } = useAuth();
   const navigate = useNavigate();
-  const [schoolName, setSchoolName] = useState("");
-  const [schoolType, setSchoolType] = useState<SchoolType | "">("");
-  const [adminName, setAdminName] = useState("");
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [terms, setTerms] = useState(false);
-  const [errors, setErrors] = useState<Errors>({});
   const [formError, setFormError] = useState("");
-  const [loading, setLoading] = useState(false);
+  const {
+    register,
+    handleSubmit,
+    watch,
+    setError,
+    formState: { errors, isSubmitting },
+  } = useForm<SignupFormValues>({
+    defaultValues: {
+      schoolName: "",
+      schoolType: "",
+      firstName: "",
+      lastName: "",
+      email: "",
+      password: "",
+      terms: false,
+    },
+  });
 
   if (account) return <Navigate to="/dashboard" replace />;
 
+  const password = watch("password", "");
   const strength = passwordStrength(password);
 
-  async function onSubmit(e: FormEvent) {
-    e.preventDefault();
-    const next: Errors = {};
-    if (schoolName.trim().length < 2) next.schoolName = "Enter your school's name.";
-    if (!schoolType) next.schoolType = "Choose your school type.";
-    if (adminName.trim().length < 2) next.adminName = "Enter your full name.";
-    if (!EMAIL_RE.test(email.trim())) next.email = "Enter a valid email address, like you@yourschool.org.";
-    if (password.length < 8) next.password = "Use at least 8 characters.";
-    if (!terms) next.terms = "Agree to the terms to register your school.";
-    setErrors(next);
+  async function onSubmit(data: SignupFormValues) {
     setFormError("");
-    if (Object.keys(next).length > 0 || !schoolType) return;
-
-    setLoading(true);
+    if (!data.schoolType) {
+      setError("schoolType", { type: "required", message: "Choose your school type." });
+      return;
+    }
     try {
-      await signUp({ schoolName, schoolType, adminName, email, password });
+      await signUp({
+        schoolName: data.schoolName,
+        schoolType: data.schoolType,
+        adminName: `${data.firstName.trim()} ${data.lastName.trim()}`,
+        email: data.email,
+        password: data.password,
+      });
       navigate("/dashboard", { replace: true });
     } catch (err) {
       setFormError(err instanceof Error ? err.message : "Something went wrong. Try again.");
-      setLoading(false);
     }
   }
 
@@ -79,7 +95,7 @@ export default function Signup() {
         </>
       }
     >
-      <form onSubmit={onSubmit} noValidate className="space-y-5">
+      <form onSubmit={handleSubmit(onSubmit, () => setFormError(""))} noValidate className="space-y-5">
         {formError && (
           <div role="alert" className="rounded-xl border border-danger/30 bg-danger/5 px-4 py-3 text-sm font-medium text-danger">
             {formError}
@@ -88,50 +104,60 @@ export default function Signup() {
 
         <TextField
           label="School name"
-          name="schoolName"
           autoComplete="organization"
           placeholder="Greenfield Secondary School"
-          value={schoolName}
-          onChange={(e) => setSchoolName(e.target.value)}
-          error={errors.schoolName}
+          {...register("schoolName", {
+            validate: (value) => value.trim().length >= 2 || "Enter your school's name.",
+          })}
+          error={errors.schoolName?.message}
         />
         <SelectField
           label="School type"
-          name="schoolType"
           placeholder="Choose one"
           options={schoolTypeOptions}
-          value={schoolType}
-          onChange={(e) => setSchoolType(e.target.value as SchoolType | "")}
-          error={errors.schoolType}
+          {...register("schoolType", { required: "Choose your school type." })}
+          error={errors.schoolType?.message}
         />
-        <TextField
-          label="Your full name"
-          name="adminName"
-          autoComplete="name"
-          placeholder="Ada Okafor"
-          value={adminName}
-          onChange={(e) => setAdminName(e.target.value)}
-          error={errors.adminName}
-        />
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <TextField
+            label="First name"
+            autoComplete="given-name"
+            placeholder="Ada"
+            {...register("firstName", {
+              validate: (value) => value.trim().length > 0 || "Enter your first name.",
+            })}
+            error={errors.firstName?.message}
+          />
+          <TextField
+            label="Last name"
+            autoComplete="family-name"
+            placeholder="Okafor"
+            {...register("lastName", {
+              validate: (value) => value.trim().length > 0 || "Enter your last name.",
+            })}
+            error={errors.lastName?.message}
+          />
+        </div>
         <TextField
           label="School email"
           type="email"
-          name="email"
           autoComplete="email"
           placeholder="you@yourschool.org"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          error={errors.email}
+          {...register("email", {
+            validate: (value) =>
+              EMAIL_RE.test(value.trim()) || "Enter a valid email address, like you@yourschool.org.",
+          })}
+          error={errors.email?.message}
         />
         <div>
           <PasswordField
             label="Password"
-            name="password"
             autoComplete="new-password"
             placeholder="At least 8 characters"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            error={errors.password}
+            {...register("password", {
+              validate: (value) => value.length >= 8 || "Use at least 8 characters.",
+            })}
+            error={errors.password?.message}
           />
           {password && (
             <div className="mt-2 flex items-center gap-3" aria-live="polite">
@@ -154,22 +180,23 @@ export default function Signup() {
           <label className="flex cursor-pointer items-start gap-3 text-sm">
             <input
               type="checkbox"
-              checked={terms}
-              onChange={(e) => setTerms(e.target.checked)}
+              {...register("terms", {
+                validate: (checked) => checked || "Agree to the terms to register your school.",
+              })}
               aria-invalid={errors.terms ? true : undefined}
               className="mt-0.5 size-5 shrink-0 rounded border-line accent-cobalt"
             />
             <span>I agree to Learnly's terms of use and privacy policy on behalf of my school.</span>
           </label>
-          {errors.terms && <p className="mt-1.5 text-sm font-medium text-danger">{errors.terms}</p>}
+          {errors.terms?.message && <p className="mt-1.5 text-sm font-medium text-danger">{errors.terms.message}</p>}
         </div>
 
         <button
           type="submit"
-          disabled={loading}
+          disabled={isSubmitting}
           className="h-12 w-full rounded-xl bg-cobalt font-semibold text-white transition-colors hover:bg-cobalt-dark disabled:cursor-not-allowed disabled:opacity-70"
         >
-          {loading ? "Registering…" : "Register school"}
+          {isSubmitting ? "Registering…" : "Register school"}
         </button>
         <p className="rounded-xl bg-ink/5 px-4 py-3 text-sm text-ink/80">
           Students and teachers don't register here. They join from the Learnly app, and you approve them from your
