@@ -22,7 +22,7 @@ export default function Navbar() {
   return (
     <header className="sticky top-0 z-30 border-b border-line bg-paper/95 backdrop-blur">
       <div className="mx-auto flex max-w-6xl items-center justify-between px-5 py-3.5 sm:px-6">
-        <Link to="/" aria-label="Learnly home" onClick={close}>
+        <Link to="/" aria-label="Komi Learning home" onClick={close}>
           <Logo />
         </Link>
 

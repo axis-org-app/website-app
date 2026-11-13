@@ -26,6 +26,28 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+.dashboard-dark {
+  --color-ink: #e6ebf7;
+  --color-paper: #101827;
+  --color-line: #354158;
+  --color-sun: #8a6718;
+  --color-mint: #48d6b3;
+  --color-mint-dark: #7be6cc;
+  --color-danger: #ff7184;
+
+  background-color: var(--color-paper);
+  color: var(--color-ink);
+  color-scheme: dark;
+}
+
+.dashboard-dark .bg-white {
+  background-color: #19253c;
+}
+
+.dashboard-dark .text-cobalt {
+  color: #aab8ff;
+}
+
 :focus-visible {
   outline: 3px solid var(--color-cobalt);
   outline-offset: 2px;

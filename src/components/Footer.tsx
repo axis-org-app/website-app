@@ -18,7 +18,7 @@ export default function Footer() {
         </nav>
       </div>
       <p className="border-t border-line px-5 py-4 text-center text-sm text-ink/60">
-        © 2026 Learnly. All rights reserved.
+        © 2026 Komi Learning. All rights reserved.
       </p>
     </footer>
   );

@@ -43,7 +43,7 @@ export default function Login() {
       subtitle="Log in to manage your school's students and teachers."
       footer={
         <>
-          Is your school new to Learnly?{" "}
+          Is your school new to Komi Learning?{" "}
           <Link to="/signup" className="font-semibold text-cobalt underline-offset-4 hover:underline">
             Register your school
           </Link>
@@ -75,6 +75,11 @@ export default function Login() {
           {...register("password", { required: "Enter your password." })}
           error={errors.password?.message}
         />
+        <div className="-mt-2 flex justify-end">
+          <Link to="/forgot-password" className="text-sm font-semibold text-cobalt underline-offset-4 hover:underline">
+            Forgot password?
+          </Link>
+        </div>
         <label className="flex cursor-pointer items-center gap-3 text-sm">
           <input
             type="checkbox"
@@ -91,7 +96,7 @@ export default function Login() {
           {isSubmitting ? "Logging in…" : "Log in"}
         </button>
         <p className="rounded-xl bg-ink/5 px-4 py-3 text-sm text-ink/80">
-          This login is for schools. Students and teachers log in through the Learnly app.
+          This login is for schools. Students and teachers log in through the Komi app.
         </p>
       </form>
     </AuthLayout>

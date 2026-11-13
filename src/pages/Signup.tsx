@@ -186,7 +186,7 @@ export default function Signup() {
               aria-invalid={errors.terms ? true : undefined}
               className="mt-0.5 size-5 shrink-0 rounded border-line accent-cobalt"
             />
-            <span>I agree to Learnly's terms of use and privacy policy on behalf of my school.</span>
+            <span>I agree to Komi Learning's terms of use and privacy policy on behalf of my school.</span>
           </label>
           {errors.terms?.message && <p className="mt-1.5 text-sm font-medium text-danger">{errors.terms.message}</p>}
         </div>
@@ -199,7 +199,7 @@ export default function Signup() {
           {isSubmitting ? "Registering…" : "Register school"}
         </button>
         <p className="rounded-xl bg-ink/5 px-4 py-3 text-sm text-ink/80">
-          Students and teachers don't register here. They join from the Learnly app, and you approve them from your
+          Students and teachers don't register here. They join from the Komi app, and you approve them from your
           dashboard.
         </p>
       </form>

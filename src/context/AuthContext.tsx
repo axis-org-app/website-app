@@ -6,6 +6,7 @@ interface AuthValue {
   account: SchoolAccount | null;
   signUp: (input: SignUpInput) => Promise<void>;
   logIn: (email: string, password: string, remember: boolean) => Promise<void>;
+  requestPasswordReset: (email: string) => Promise<void>;
   logOut: () => void;
 }
 
@@ -18,6 +19,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     account,
     signUp: async (input) => setAccount(await api.signUp(input)),
     logIn: async (email, password, remember) => setAccount(await api.logIn(email, password, remember)),
+    requestPasswordReset: (email) => api.requestPasswordReset(email),
     logOut: () => {
       api.logOut();
       setAccount(null);

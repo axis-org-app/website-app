@@ -19,7 +19,7 @@ export default function AuthLayout({ title, subtitle, children, footer }: AuthLa
   return (
     <div className="grid min-h-screen lg:grid-cols-[minmax(0,1fr)_minmax(0,0.85fr)]">
       <main className="flex flex-col px-5 py-6 sm:px-12 sm:py-8">
-        <Link to="/" aria-label="Learnly home" className="w-fit">
+        <Link to="/" aria-label="Komi Learning home" className="w-fit">
           <Logo />
         </Link>
         <div className="mx-auto flex w-full max-w-md flex-1 flex-col justify-center py-8 sm:py-10">
@@ -35,7 +35,7 @@ export default function AuthLayout({ title, subtitle, children, footer }: AuthLa
         <div className="absolute -bottom-16 left-10 size-40 rotate-12 rounded-3xl bg-sun" aria-hidden="true" />
         <div className="relative max-w-md">
           <h2 className="font-display text-3xl font-bold leading-snug">
-            Run Learnly for your school from one dashboard.
+            Run Komi Learning for your school from one dashboard.
           </h2>
           <ul className="mt-8 space-y-6">
             {perks.map((perk) => (
