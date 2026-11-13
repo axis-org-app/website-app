@@ -7,7 +7,7 @@ import DashboardPreview from "../components/DashboardPreview";
 
 const steps = [
   { title: "Register your school", body: "Create your school's account on this website and your dashboard is ready." },
-  { title: "People request to join", body: "Teachers and students sign up in the Learnly app and ask to join your school." },
+  { title: "People request to join", body: "Teachers and students sign up in the Komi app and ask to join your school." },
   { title: "You approve them", body: "Approve each request from your dashboard, so only your own people get in." },
   { title: "Learning begins", body: "Teachers set assessments, and students submit, revise and earn rewards." },
 ];
@@ -204,7 +204,7 @@ export default function Home() {
         <section className="mx-auto max-w-6xl px-5 py-16 sm:px-6 sm:py-20">
           <div className="flex flex-col items-start justify-between gap-6 rounded-3xl bg-cobalt p-8 text-white md:flex-row md:items-center md:p-14">
             <div>
-              <h2 className="font-display text-3xl font-bold tracking-tight sm:text-4xl">Bring Learnly to your school</h2>
+              <h2 className="font-display text-3xl font-bold tracking-tight sm:text-4xl">Bring Komi Learning to your school</h2>
               <p className="mt-2 text-white/85">Register your school to get your dashboard.</p>
             </div>
             <div className="flex w-full flex-col gap-3 sm:w-auto sm:flex-row">
