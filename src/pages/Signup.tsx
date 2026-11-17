@@ -39,6 +39,7 @@ export default function Signup() {
   const { account, signUp } = useAuth();
   const navigate = useNavigate();
   const [formError, setFormError] = useState("");
+  const [confirmationMessage, setConfirmationMessage] = useState("");
   const {
     register,
     handleSubmit,
@@ -48,7 +49,7 @@ export default function Signup() {
   } = useForm<SignupFormValues>({
     defaultValues: {
       schoolName: "",
-      schoolType: "",
+      schoolType: "secondary",
       firstName: "",
       lastName: "",
       email: "",
@@ -64,19 +65,24 @@ export default function Signup() {
 
   async function onSubmit(data: SignupFormValues) {
     setFormError("");
+    setConfirmationMessage("");
     if (!data.schoolType) {
       setError("schoolType", { type: "required", message: "Choose your school type." });
       return;
     }
     try {
-      await signUp({
+      const signedIn = await signUp({
         schoolName: data.schoolName,
         schoolType: data.schoolType,
         adminName: `${data.firstName.trim()} ${data.lastName.trim()}`,
         email: data.email,
         password: data.password,
       });
-      navigate("/dashboard", { replace: true });
+      if (signedIn) {
+        navigate("/dashboard", { replace: true });
+      } else {
+        setConfirmationMessage("Check your email to confirm your account before logging in.");
+      }
     } catch (err) {
       setFormError(err instanceof Error ? err.message : "Something went wrong. Try again.");
     }
@@ -99,6 +105,11 @@ export default function Signup() {
         {formError && (
           <div role="alert" className="rounded-xl border border-danger/30 bg-danger/5 px-4 py-3 text-sm font-medium text-danger">
             {formError}
+          </div>
+        )}
+        {confirmationMessage && (
+          <div role="status" className="rounded-xl border border-mint/30 bg-mint/10 px-4 py-3 text-sm font-medium">
+            {confirmationMessage}
           </div>
         )}
 

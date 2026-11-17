@@ -27,11 +27,12 @@ npm run build    # type-check and production build
 
 ## Connecting a real backend
 
-- **Auth** is mocked in `src/lib/auth.ts` using localStorage. Replace `signUp`, `logIn`, `logOut` and `getSession`
-  with calls to your API (prefer httpOnly cookie sessions). `requestPasswordReset` is the integration point for
-  password recovery. With Supabase Auth, implement it using `supabase.auth.resetPasswordForEmail(email, { redirectTo })`,
-  then add a recovery callback route that lets the school set a new password with `supabase.auth.updateUser`.
-  The local demo deliberately does not change passwords without verified email ownership.
+- Supabase is ready to configure. Copy `.env.example` to `.env.local` and set
+  `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY` from your Supabase project.
+  The client is available from `src/lib/supabase.ts`. Do not put a secret/service-role
+  key in this frontend app.
+- **Auth** uses Supabase Auth for school signup, login, logout, and session restoration. School details are sent
+  as auth user metadata. Password recovery is not set up yet; it needs a recovery route before reset emails are enabled.
 - **Dashboard data** is a browser-local demo in `src/lib/schoolData.ts`. It is stored separately for each school in
   localStorage. Replace this store with API calls to synchronize real school, student, and teacher accounts across
   devices. The initial approval requests and student list are sample records.

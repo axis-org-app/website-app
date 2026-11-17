@@ -10,7 +10,6 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 interface LoginFormValues {
   email: string;
   password: string;
-  remember: boolean;
 }
 
 export default function Login() {
@@ -22,15 +21,15 @@ export default function Login() {
     handleSubmit,
     formState: { errors, isSubmitting },
   } = useForm<LoginFormValues>({
-    defaultValues: { email: "", password: "", remember: true },
+    defaultValues: { email: "", password: "" },
   });
 
   if (account) return <Navigate to="/dashboard" replace />;
 
-  async function onSubmit({ email, password, remember }: LoginFormValues) {
+  async function onSubmit({ email, password }: LoginFormValues) {
     setFormError("");
     try {
-      await logIn(email, password, remember);
+      await logIn(email, password);
       navigate("/dashboard", { replace: true });
     } catch (err) {
       setFormError(err instanceof Error ? err.message : "Something went wrong. Try again.");
@@ -80,14 +79,6 @@ export default function Login() {
             Forgot password?
           </Link>
         </div>
-        <label className="flex cursor-pointer items-center gap-3 text-sm">
-          <input
-            type="checkbox"
-            {...register("remember")}
-            className="size-5 rounded border-line accent-cobalt"
-          />
-          Keep me logged in on this device
-        </label>
         <button
           type="submit"
           disabled={isSubmitting}
