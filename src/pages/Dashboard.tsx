@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, Navigate } from "react-router-dom";
 import Logo from "../components/Logo";
 import { useAuth } from "../context/AuthContext";
@@ -28,10 +28,8 @@ function Stat({ label, value }: { label: string; value: number }) {
 }
 
 export default function Dashboard() {
-  const { account, logOut } = useAuth();
-  const [workspace, setWorkspace] = useState<SchoolWorkspace | null>(() =>
-    account ? getSchoolWorkspace(account.email) : null,
-  );
+  const { account, isLoading, logOut } = useAuth();
+  const [workspaceState, setWorkspaceState] = useState<{ email: string; workspace: SchoolWorkspace } | null>(null);
   const [isDarkMode, setIsDarkMode] = useState(() => localStorage.getItem(DASHBOARD_THEME_KEY) === "dark");
   const [notice, setNotice] = useState("");
   const [studentSearch, setStudentSearch] = useState("");
@@ -44,13 +42,22 @@ export default function Dashboard() {
     (TeachingAssignment & { teacherId: string; teacherName: string }) | null
   >(null);
 
-  if (!account || !workspace) return <Navigate to="/login" replace />;
+  useEffect(() => {
+    if (account) {
+      setWorkspaceState({ email: account.email, workspace: getSchoolWorkspace(account.email) });
+    }
+  }, [account?.email]);
+
+  if (isLoading) return <p className="p-6 text-center">Loading your account…</p>;
+  if (!account) return <Navigate to="/login" replace />;
+  if (workspaceState?.email !== account.email) return <p className="p-6 text-center">Loading your dashboard…</p>;
+  const workspace = workspaceState.workspace;
   const schoolAccount = account;
   const schoolWorkspace = workspace;
 
   function commitWorkspace(next: SchoolWorkspace) {
     saveSchoolWorkspace(schoolAccount.email, next);
-    setWorkspace(next);
+    setWorkspaceState({ email: schoolAccount.email, workspace: next });
   }
 
   function resolve(request: JoinRequest, approve: boolean) {

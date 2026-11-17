@@ -47,8 +47,7 @@ export default function ForgotPassword() {
     >
       <form onSubmit={handleSubmit(onSubmit, () => setFormError(""))} noValidate className="space-y-5">
         <p className="rounded-xl border border-sun/70 bg-sun/20 px-4 py-3 text-sm">
-          Password recovery is not available in this browser-only demo. Once Supabase Auth is connected, this form
-          can send a secure recovery email.
+          Password recovery is not set up yet. Contact your administrator if you need to reset your password.
         </p>
         {formError && (
           <div role="alert" className="rounded-xl border border-danger/30 bg-danger/5 px-4 py-3 text-sm font-medium text-danger">
