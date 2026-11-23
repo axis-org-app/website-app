@@ -32,6 +32,7 @@ export default function Dashboard() {
   const [workspaceState, setWorkspaceState] = useState<{ email: string; workspace: SchoolWorkspace } | null>(null);
   const [isDarkMode, setIsDarkMode] = useState(() => localStorage.getItem(DASHBOARD_THEME_KEY) === "dark");
   const [notice, setNotice] = useState("");
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [studentSearch, setStudentSearch] = useState("");
   const [studentClassFilter, setStudentClassFilter] = useState("");
   const [studentPage, setStudentPage] = useState(1);
@@ -58,6 +59,19 @@ export default function Dashboard() {
   function commitWorkspace(next: SchoolWorkspace) {
     saveSchoolWorkspace(schoolAccount.email, next);
     setWorkspaceState({ email: schoolAccount.email, workspace: next });
+  }
+
+  async function handleLogOut() {
+    setIsLoggingOut(true);
+    setNotice("");
+    try {
+      await logOut();
+    } catch (error) {
+      setNotice(
+        `Unable to log out: ${error instanceof Error ? error.message : "Please try again."}`,
+      );
+      setIsLoggingOut(false);
+    }
   }
 
   function resolve(request: JoinRequest, approve: boolean) {
@@ -220,10 +234,11 @@ export default function Dashboard() {
             </button>
             <button
               type="button"
-              onClick={logOut}
+              onClick={() => void handleLogOut()}
+              disabled={isLoggingOut}
               className="shrink-0 rounded-xl border border-line px-4 py-2 text-sm font-semibold hover:border-ink/30"
             >
-              Log out
+              {isLoggingOut ? "Logging out…" : "Log out"}
             </button>
           </div>
         </div>

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useForm } from "react-hook-form";
-import { Link, Navigate, useNavigate } from "react-router-dom";
+import { Link, Navigate, useLocation, useNavigate } from "react-router-dom";
 import AuthLayout from "../components/AuthLayout";
 import { PasswordField, TextField } from "../components/TextField";
 import { useAuth } from "../context/AuthContext";
@@ -14,7 +14,15 @@ interface LoginFormValues {
 
 export default function Login() {
   const { account, logIn } = useAuth();
+  const location = useLocation();
   const navigate = useNavigate();
+  const logoutWarning =
+    typeof location.state === "object" &&
+    location.state !== null &&
+    "logoutWarning" in location.state &&
+    typeof location.state.logoutWarning === "string"
+      ? location.state.logoutWarning
+      : "";
   const [formError, setFormError] = useState("");
   const {
     register,
@@ -53,6 +61,11 @@ export default function Login() {
         {formError && (
           <div role="alert" className="rounded-xl border border-danger/30 bg-danger/5 px-4 py-3 text-sm font-medium text-danger">
             {formError}
+          </div>
+        )}
+        {logoutWarning && (
+          <div role="status" className="rounded-xl border border-sun/70 bg-sun/20 px-4 py-3 text-sm font-medium">
+            {logoutWarning}
           </div>
         )}
         <TextField
