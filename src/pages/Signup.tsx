@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type FormEvent } from "react";
 import { useForm } from "react-hook-form";
 import { Link, Navigate, useNavigate } from "react-router-dom";
 import AuthLayout from "../components/AuthLayout";
@@ -36,10 +36,13 @@ interface SignupFormValues {
 }
 
 export default function Signup() {
-  const { account, signUp } = useAuth();
+  const { account, signUp, verifySignupOtp } = useAuth();
   const navigate = useNavigate();
   const [formError, setFormError] = useState("");
   const [confirmationMessage, setConfirmationMessage] = useState("");
+  const [otpEmail, setOtpEmail] = useState("");
+  const [otpCode, setOtpCode] = useState("");
+  const [isVerifyingOtp, setIsVerifyingOtp] = useState(false);
   const {
     register,
     handleSubmit,
@@ -49,7 +52,7 @@ export default function Signup() {
   } = useForm<SignupFormValues>({
     defaultValues: {
       schoolName: "",
-      schoolType: "secondary",
+      schoolType: "Secondary",
       firstName: "",
       lastName: "",
       email: "",
@@ -81,10 +84,30 @@ export default function Signup() {
       if (signedIn) {
         navigate("/dashboard", { replace: true });
       } else {
-        setConfirmationMessage("Check your email to confirm your account before logging in.");
+        setOtpEmail(data.email.trim().toLowerCase());
+        setConfirmationMessage(`Enter the 6-digit code sent to ${data.email.trim()}.`);
       }
     } catch (err) {
       setFormError(err instanceof Error ? err.message : "Something went wrong. Try again.");
+    }
+  }
+
+  async function onVerifyOtp(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setFormError("");
+    if (!/^\d{8}$/.test(otpCode)) {
+      setFormError("Enter the 6-digit verification code from your email.");
+      return;
+    }
+
+    setIsVerifyingOtp(true);
+    try {
+      await verifySignupOtp(otpEmail, otpCode);
+      navigate("/dashboard", { replace: true });
+    } catch (err) {
+      setFormError(err instanceof Error ? err.message : "Unable to verify your email. Try again.");
+    } finally {
+      setIsVerifyingOtp(false);
     }
   }
 
@@ -101,17 +124,42 @@ export default function Signup() {
         </>
       }
     >
-      <form onSubmit={handleSubmit(onSubmit, () => setFormError(""))} noValidate className="space-y-5">
-        {formError && (
-          <div role="alert" className="rounded-xl border border-danger/30 bg-danger/5 px-4 py-3 text-sm font-medium text-danger">
-            {formError}
-          </div>
-        )}
-        {confirmationMessage && (
-          <div role="status" className="rounded-xl border border-mint/30 bg-mint/10 px-4 py-3 text-sm font-medium">
+      {confirmationMessage ? (
+        <form onSubmit={onVerifyOtp} noValidate className="space-y-5">
+          {formError && (
+            <div role="alert" className="rounded-xl border border-danger/30 bg-danger/5 px-4 py-3 text-sm font-medium text-danger">
+              {formError}
+            </div>
+          )}
+          <p role="status" className="rounded-xl border border-mint/30 bg-mint/10 px-4 py-3 text-sm font-medium">
             {confirmationMessage}
-          </div>
-        )}
+          </p>
+          <TextField
+            label="6-digit verification code"
+            type="text"
+            inputMode="numeric"
+            autoComplete="one-time-code"
+            placeholder="123456"
+            maxLength={8}
+            value={otpCode}
+            onChange={(event) => setOtpCode(event.target.value.replace(/\D/g, "").slice(0, 8))}
+            required
+          />
+          <button
+            type="submit"
+            disabled={isVerifyingOtp}
+            className="h-12 w-full rounded-xl bg-cobalt font-semibold text-white transition-colors hover:bg-cobalt-dark disabled:cursor-not-allowed disabled:opacity-70"
+          >
+            {isVerifyingOtp ? "Verifying…" : "Verify email"}
+          </button>
+        </form>
+      ) : (
+        <form onSubmit={handleSubmit(onSubmit, () => setFormError(""))} noValidate className="space-y-5">
+          {formError && (
+            <div role="alert" className="rounded-xl border border-danger/30 bg-danger/5 px-4 py-3 text-sm font-medium text-danger">
+              {formError}
+            </div>
+          )}
 
         <TextField
           label="School name"
@@ -213,7 +261,8 @@ export default function Signup() {
           Students and teachers don't register here. They join from the Komi app, and you approve them from your
           dashboard.
         </p>
-      </form>
+        </form>
+      )}
     </AuthLayout>
   );
 }
