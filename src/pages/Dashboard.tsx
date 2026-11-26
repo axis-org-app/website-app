@@ -3,10 +3,9 @@ import { Link, Navigate } from "react-router-dom";
 import Logo from "../components/Logo";
 import { useAuth } from "../context/AuthContext";
 import { schoolTypeLabels } from "../lib/auth";
+import { supabase } from "../lib/supabase";
 import {
-  availableClasses,
   getSchoolWorkspace,
-  offeredSubjects,
   saveSchoolWorkspace,
   type JoinRequest,
   type ManagedPerson,
@@ -17,6 +16,109 @@ import {
 
 const STUDENTS_PER_PAGE = 25;
 const DASHBOARD_THEME_KEY = "komi.dashboard-theme";
+
+interface JoinRequestRow {
+  id: string;
+  created_at: string;
+  profile_id: string;
+  school_id: string;
+  requested_role: "student" | "teacher";
+  status: "pending" | "approved" | "rejected";
+  is_deleted: boolean;
+  Profile:
+    | {
+        first_name: string | null;
+        last_name: string | null;
+      }
+    | Array<{
+        first_name: string | null;
+        last_name: string | null;
+      }>
+    | null;
+}
+
+interface SchoolSubjectRow {
+  id: string;
+  subject_id: string;
+}
+
+interface ClassRow {
+  id: string;
+  name: string;
+}
+
+interface TeacherRow {
+  id: string;
+  profile_id: string;
+}
+
+interface TeacherSubjectRow {
+  teacher_id: string;
+  school_subject_id: string;
+  class_id: string;
+}
+
+interface ProfileRow {
+  id: string;
+  first_name: string | null;
+  last_name: string | null;
+}
+
+function schoolIdFromRpcResult(result: unknown): string {
+  const row = Array.isArray(result) ? result[0] : result;
+  if (typeof row === "string" && row.length > 0) return row;
+  if (typeof row === "object" && row !== null) {
+    if ("school_id" in row && typeof row.school_id === "string") return row.school_id;
+    if ("fetch_school_id" in row && typeof row.fetch_school_id === "string") return row.fetch_school_id;
+  }
+  throw new Error("fetch_school_id did not return a school ID.");
+}
+
+function normalizeJoinRole(role: JoinRequestRow["requested_role"] | string): PersonRole {
+  return role === "teacher" ? "teacher" : "student";
+}
+
+function joinRequestName(row: JoinRequestRow): string {
+  const profile = Array.isArray(row.Profile) ? row.Profile[0] : row.Profile;
+  const name = [profile?.first_name, profile?.last_name].filter(Boolean).join(" ").trim();
+  return name || `${normalizeJoinRole(row.requested_role)} applicant`;
+}
+
+function formatJoinRequestTime(createdAt: string): string {
+  const created = new Date(createdAt);
+  const elapsedMinutes = Math.max(0, Math.floor((Date.now() - created.getTime()) / 60000));
+  if (!Number.isFinite(elapsedMinutes)) return "Recently";
+  if (elapsedMinutes < 1) return "Just now";
+  if (elapsedMinutes < 60) return `${elapsedMinutes} minute${elapsedMinutes === 1 ? "" : "s"} ago`;
+  const elapsedHours = Math.floor(elapsedMinutes / 60);
+  if (elapsedHours < 24) return `${elapsedHours} hour${elapsedHours === 1 ? "" : "s"} ago`;
+  const elapsedDays = Math.floor(elapsedHours / 24);
+  if (elapsedDays < 7) return `${elapsedDays} day${elapsedDays === 1 ? "" : "s"} ago`;
+  return created.toLocaleDateString();
+}
+
+function toManagedPerson(row: JoinRequestRow): ManagedPerson {
+  const role = normalizeJoinRole(row.requested_role);
+  return {
+    id: row.profile_id,
+    name: joinRequestName(row),
+    role,
+    className: "",
+    teachingAssignments: [],
+    enabled: true,
+  };
+}
+
+function mergeApprovedPeople(
+  existing: ManagedPerson[],
+  approved: ManagedPerson[],
+): ManagedPerson[] {
+  const merged = new Map(existing.map((person) => [person.id, person]));
+  for (const person of approved) {
+    if (!merged.has(person.id)) merged.set(person.id, person);
+  }
+  return [...merged.values()];
+}
 
 function Stat({ label, value }: { label: string; value: number }) {
   return (
@@ -33,6 +135,16 @@ export default function Dashboard() {
   const [isDarkMode, setIsDarkMode] = useState(() => localStorage.getItem(DASHBOARD_THEME_KEY) === "dark");
   const [notice, setNotice] = useState("");
   const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const [subjectRows, setSubjectRows] = useState<{ id: string; name: string }[]>([]);
+  const [schoolId, setSchoolId] = useState("");
+  const [selectedSubjectIds, setSelectedSubjectIds] = useState<string[]>([]);
+  const [schoolSubjectRows, setSchoolSubjectRows] = useState<SchoolSubjectRow[]>([]);
+  const [classRows, setClassRows] = useState<ClassRow[]>([]);
+  const [draftSubjectIds, setDraftSubjectIds] = useState<string[]>([]);
+  const [isEditingSubjects, setIsEditingSubjects] = useState(false);
+  const [isSavingSubjects, setIsSavingSubjects] = useState(false);
+  const [isLoadingSubjects, setIsLoadingSubjects] = useState(true);
+  const [subjectLoadError, setSubjectLoadError] = useState("");
   const [studentSearch, setStudentSearch] = useState("");
   const [studentClassFilter, setStudentClassFilter] = useState("");
   const [studentPage, setStudentPage] = useState(1);
@@ -47,6 +159,267 @@ export default function Dashboard() {
     if (account) {
       setWorkspaceState({ email: account.email, workspace: getSchoolWorkspace(account.email) });
     }
+  }, [account?.email]);
+
+  useEffect(() => {
+    if (!account) return;
+    let active = true;
+    const accountEmail = account.email;
+
+    async function loadSubjects() {
+      setIsLoadingSubjects(true);
+      setSubjectLoadError("");
+      setSchoolId("");
+      setSubjectRows([]);
+      setSelectedSubjectIds([]);
+      setDraftSubjectIds([]);
+      try {
+        const [
+          { data: subjects, error: subjectsError },
+          { data: schoolResult, error: schoolError },
+          { data: classes, error: classesError },
+        ] = await Promise.all([
+          supabase.from("Subject").select("id, name").order("name"),
+          supabase.rpc("fetch_school_id"),
+          supabase.from("Class").select("id, name").order("name"),
+        ]);
+
+        if (!active) return;
+        if (subjectsError) throw new Error(`Unable to load subjects: ${subjectsError.message}`);
+        if (schoolError) throw new Error(`Unable to load your school ID: ${schoolError.message}`);
+        if (classesError) throw new Error(`Unable to load classes: ${classesError.message}`);
+
+        const schoolId = schoolIdFromRpcResult(schoolResult);
+        const subjectList = subjects ?? [];
+        const { data: associations, error: associationsError } = await supabase
+          .from("School_Subjects")
+          .select("id, subject_id")
+          .eq("school_id", schoolId);
+
+        if (!active) return;
+        if (associationsError) throw new Error(`Unable to load this school's selected subjects: ${associationsError.message}`);
+
+        const availableSubjectIds = new Set(subjectList.map((subject) => subject.id));
+        const associationRows = (associations ?? []) as SchoolSubjectRow[];
+        const selectedIds = associationRows
+          .map((row) => row.subject_id)
+          .filter((subjectId) => availableSubjectIds.has(subjectId));
+        console.info("[School_Subjects] Associations loaded for this school:", associations ?? []);
+        console.info("[School_Subjects] Selected subject IDs:", selectedIds);
+        const selectedNames = subjectList
+          .filter((subject) => selectedIds.includes(subject.id))
+          .map((subject) => subject.name);
+        setSchoolId(schoolId);
+        setSubjectRows(subjectList);
+        setClassRows((classes ?? []) as ClassRow[]);
+        setSchoolSubjectRows(associationRows);
+        setSelectedSubjectIds(selectedIds);
+        setDraftSubjectIds(selectedIds);
+        setWorkspaceState((current) =>
+          current && current.email === accountEmail
+            ? {
+                ...current,
+                workspace: { ...current.workspace, subjects: selectedNames },
+              }
+            : current,
+        );
+        setIsLoadingSubjects(false);
+      } catch (error) {
+        if (active) {
+          setSubjectLoadError(error instanceof Error ? error.message : "Unable to load your subjects.");
+          setIsLoadingSubjects(false);
+        }
+      }
+    }
+
+    void loadSubjects();
+    return () => {
+      active = false;
+    };
+  }, [account?.email]);
+
+  useEffect(() => {
+    if (!account) return;
+
+    let active = true;
+
+    // RLS is responsible for limiting join_request rows to this signed-in school.
+    // This subscription intentionally has no school_id filter because the server policy
+    // determines which rows are visible to the dashboard.
+    const loadJoinRequests = async () => {
+      const { data, error } = await supabase
+        .from("Join_request")
+        .select('id,created_at,profile_id,school_id,requested_role,status,is_deleted,"Profile"(first_name,last_name)')
+        .eq("is_deleted", false)
+        .in("status", ["pending", "approved"]);
+
+      if (error) {
+        console.error("[Join_request] RLS-filtered fetch failed:", error);
+        throw error;
+      }
+
+      const rows = (data ?? []) as JoinRequestRow[];
+      console.info("[Join_request] Rows returned to this session after RLS:", rows);
+      console.info(
+        "[Join_request] Pending users:",
+        rows.filter((row) => row.status === "pending"),
+      );
+      if (!active) return;
+
+      const approvedTeacherRequests = rows.filter(
+        (row) => row.status === "approved" && row.requested_role === "teacher",
+      );
+      const approvedProfileIds = [...new Set(approvedTeacherRequests.map((row) => row.profile_id))];
+      let databaseTeachers: ManagedPerson[] = [];
+
+      if (approvedProfileIds.length > 0) {
+        const { data: teacherData, error: teacherError } = await supabase
+          .from("Teacher")
+          .select("id, profile_id")
+          .in("profile_id", approvedProfileIds);
+        if (teacherError) throw teacherError;
+        const teachers = (teacherData ?? []) as TeacherRow[];
+        const teacherIds = teachers.map((teacher) => teacher.id);
+
+        const [
+          { data: profileData, error: profileError },
+          { data: assignmentData, error: assignmentError },
+          { data: schoolData, error: schoolError },
+          { data: classData, error: classError },
+          { data: subjectData, error: subjectError },
+        ] = await Promise.all([
+          supabase.from("Profile").select("id, first_name, last_name").in("id", approvedProfileIds),
+          teacherIds.length > 0
+            ? supabase
+                .from("Teacher_Subjects")
+                .select("teacher_id, school_subject_id, class_id")
+                .in("teacher_id", teacherIds)
+            : Promise.resolve({ data: [], error: null }),
+          supabase.rpc("fetch_school_id"),
+          supabase.from("Class").select("id, name").order("name"),
+          supabase.from("Subject").select("id, name"),
+        ]);
+        if (profileError) throw profileError;
+        if (assignmentError) throw assignmentError;
+        if (schoolError) throw schoolError;
+        if (classError) throw classError;
+        if (subjectError) throw subjectError;
+
+        const resolvedSchoolId = schoolIdFromRpcResult(schoolData);
+        const { data: schoolSubjectData, error: schoolSubjectError } = await supabase
+          .from("School_Subjects")
+          .select("id, subject_id")
+          .eq("school_id", resolvedSchoolId);
+        if (schoolSubjectError) throw schoolSubjectError;
+
+        const profiles = (profileData ?? []) as ProfileRow[];
+        const assignments = (assignmentData ?? []) as TeacherSubjectRow[];
+        const schoolSubjects = (schoolSubjectData ?? []) as SchoolSubjectRow[];
+        const classes = (classData ?? []) as ClassRow[];
+        const subjects = (subjectData ?? []) as { id: string; name: string }[];
+
+        databaseTeachers = teachers.map((teacher) => {
+          const profile = profiles.find((row) => row.id === teacher.profile_id);
+          const teacherAssignments = assignments
+            .filter((assignment) => assignment.teacher_id === teacher.id)
+            .flatMap((assignment) => {
+              const schoolSubject = schoolSubjects.find((row) => row.id === assignment.school_subject_id);
+              const subject = subjects.find((row) => row.id === schoolSubject?.subject_id);
+              const classRow = classes.find((row) => row.id === assignment.class_id);
+              if (!subject || !classRow) return [];
+              return [{
+                subject: subject.name,
+                className: classRow.name,
+                classId: classRow.id,
+                schoolSubjectId: assignment.school_subject_id,
+              }];
+            });
+
+          return {
+            id: teacher.id,
+            name: [profile?.first_name, profile?.last_name].filter(Boolean).join(" ").trim() || "Teacher",
+            role: "teacher",
+            className: "",
+            teachingAssignments: teacherAssignments,
+            enabled: true,
+          };
+        });
+      }
+
+      setWorkspaceState((current) => {
+        if (!current || current.email !== account.email) return current;
+
+        const pendingRequests: JoinRequest[] = rows
+          .filter((row) => row.status === "pending")
+          .map((row) => ({
+            id: row.profile_id,
+            joinRequestId: row.id,
+            name: joinRequestName(row),
+            role: normalizeJoinRole(row.requested_role),
+            detail: normalizeJoinRole(row.requested_role) === "student" ? "Student" : "Teacher",
+            requested: formatJoinRequestTime(row.created_at),
+          }));
+
+        // Approved student profiles remain sourced from join requests; teachers use Teacher.id.
+        const approvedRequests = rows.filter((row) => row.status === "approved");
+        const approvedStudents = approvedRequests
+          .filter((row) => normalizeJoinRole(row.requested_role) === "student")
+          .map((row) => toManagedPerson(row));
+        const teachers = databaseTeachers.map((teacher) => {
+          const existingTeacher = current.workspace.teachers.find((person) => person.id === teacher.id);
+          return existingTeacher ? { ...teacher, enabled: existingTeacher.enabled } : teacher;
+        });
+
+        const nextWorkspace: SchoolWorkspace = {
+          ...current.workspace,
+          requests: pendingRequests,
+          students: mergeApprovedPeople(current.workspace.students, approvedStudents),
+          teachers,
+        };
+
+        // Keep non-Supabase dashboard settings and managed people in the existing local workspace.
+        // Realtime data is reapplied on every change, so this cache remains a UI fallback.
+        saveSchoolWorkspace(account.email, nextWorkspace);
+        return { email: current.email, workspace: nextWorkspace };
+      });
+    };
+
+    // Reload on any insert/update/delete so profile names and status changes stay current.
+    const channel = supabase
+      .channel(`join-request:${account.email}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "Join_request" },
+        (payload) => {
+          console.info("[Join_request] Realtime event received:", payload);
+          void loadJoinRequests().catch((error: unknown) => {
+            if (active) {
+              setNotice(error instanceof Error ? error.message : "Unable to refresh join requests.");
+            }
+          });
+        },
+      )
+      .subscribe((subscriptionStatus) => {
+        if (!active) return;
+        if (subscriptionStatus === "SUBSCRIBED") {
+          setNotice("");
+        } else if (subscriptionStatus === "CHANNEL_ERROR") {
+          setNotice("Real-time join requests could not connect. The dashboard will retry while the page remains open.");
+        } else if (subscriptionStatus === "TIMED_OUT") {
+          setNotice("Real-time join requests timed out. Refresh the page or check Supabase Realtime.");
+        }
+      });
+
+    void loadJoinRequests().catch((error: unknown) => {
+      if (active) {
+        setNotice(error instanceof Error ? error.message : "Unable to load join requests.");
+      }
+    });
+
+    return () => {
+      active = false;
+      void supabase.removeChannel(channel);
+    };
   }, [account?.email]);
 
   if (isLoading) return <p className="p-6 text-center">Loading your account…</p>;
@@ -74,7 +447,19 @@ export default function Dashboard() {
     }
   }
 
-  function resolve(request: JoinRequest, approve: boolean) {
+  async function resolve(request: JoinRequest, approve: boolean) {
+    if (request.joinRequestId) {
+      const { error } = await supabase.rpc(
+        approve ? "approve_join_request" : "reject_join_request",
+        { request_id: request.joinRequestId },
+      );
+
+      if (error) {
+        setNotice(`Unable to ${approve ? "approve" : "decline"} ${request.name}: ${error.message}`);
+        return;
+      }
+    }
+
     const next: SchoolWorkspace = {
       ...schoolWorkspace,
       requests: schoolWorkspace.requests.filter((item) => item.id !== request.id),
@@ -106,22 +491,34 @@ export default function Dashboard() {
 
   function requestAssignment() {
     const teacher = schoolWorkspace.teachers.find((person) => person.id === assignmentTeacherId);
-    if (!teacher?.enabled || !assignmentClass || !schoolWorkspace.subjects.includes(assignmentSubject)) {
+    const classRow = classRows.find((row) => row.id === assignmentClass);
+    const subject = subjectRows.find(
+      (row) => row.name === assignmentSubject && selectedSubjectIds.includes(row.id),
+    );
+    const schoolSubject = schoolSubjectRows.find((row) => row.subject_id === subject?.id);
+    if (!teacher?.enabled || !classRow || !subject || !schoolSubject) {
       setNotice("Select an enabled teacher, a class, and a subject your school offers.");
       return;
     }
     setPendingAssignment({
       teacherId: teacher.id,
       teacherName: teacher.name,
-      className: assignmentClass,
+      className: classRow.name,
+      classId: classRow.id,
       subject: assignmentSubject,
+      schoolSubjectId: schoolSubject.id,
     });
   }
 
-  function confirmAssignment() {
+  async function confirmAssignment() {
     if (!pendingAssignment) return;
     const teacher = schoolWorkspace.teachers.find((person) => person.id === pendingAssignment.teacherId);
-    if (!teacher?.enabled || !schoolWorkspace.subjects.includes(pendingAssignment.subject)) {
+    if (
+      !teacher?.enabled ||
+      !pendingAssignment.classId ||
+      !pendingAssignment.schoolSubjectId ||
+      !schoolWorkspace.subjects.includes(pendingAssignment.subject)
+    ) {
       setPendingAssignment(null);
       setNotice("The teacher or subject is no longer available. Choose an enabled teacher and offered subject, then try again.");
       return;
@@ -137,10 +534,25 @@ export default function Dashboard() {
       setNotice(`${teacher.name} is already assigned to teach ${pendingAssignment.subject} in ${pendingAssignment.className}.`);
       return;
     }
+    const { error } = await supabase.from("Teacher_Subjects").insert({
+      school_subject_id: pendingAssignment.schoolSubjectId,
+      teacher_id: teacher.id,
+      class_id: pendingAssignment.classId,
+    });
+    if (error) {
+      setNotice(`Unable to save teacher assignment: ${error.message}`);
+      return;
+    }
+
     updatePerson("teacher", teacher.id, {
       teachingAssignments: [
         ...teacher.teachingAssignments,
-        { className: pendingAssignment.className, subject: pendingAssignment.subject },
+        {
+          className: pendingAssignment.className,
+          subject: pendingAssignment.subject,
+          classId: pendingAssignment.classId,
+          schoolSubjectId: pendingAssignment.schoolSubjectId,
+        },
       ],
     });
     setNotice(
@@ -151,21 +563,139 @@ export default function Dashboard() {
     setAssignmentSubject("");
   }
 
-  function toggleSchoolSubject(subject: string) {
-    const isOffered = schoolWorkspace.subjects.includes(subject);
-    commitWorkspace({
-      ...schoolWorkspace,
-      subjects: isOffered
-        ? schoolWorkspace.subjects.filter((item) => item !== subject)
-        : [...schoolWorkspace.subjects, subject],
-      teachers: isOffered
-        ? schoolWorkspace.teachers.map((teacher) => ({
-            ...teacher,
-            teachingAssignments: teacher.teachingAssignments.filter((assignment) => assignment.subject !== subject),
-          }))
-        : schoolWorkspace.teachers,
+  async function removeTeacherAssignment(teacher: ManagedPerson, assignment: TeachingAssignment) {
+    if (!assignment.classId || !assignment.schoolSubjectId) {
+      setNotice("This assignment has no database identifiers and cannot be removed from Supabase.");
+      return;
+    }
+
+    const { data: deletedRows, error } = await supabase
+      .from("Teacher_Subjects")
+      .delete()
+      .eq("teacher_id", teacher.id)
+      .eq("school_subject_id", assignment.schoolSubjectId)
+      .eq("class_id", assignment.classId)
+      .select("teacher_id");
+    if (error) {
+      setNotice(`Unable to remove teacher assignment: ${error.message}`);
+      return;
+    }
+    if (!deletedRows?.length) {
+      setNotice("No assignment was removed. Check the Teacher_Subjects row and its delete permissions in Supabase RLS.");
+      return;
+    }
+
+    updatePerson("teacher", teacher.id, {
+      teachingAssignments: teacher.teachingAssignments.filter(
+        (item) =>
+          item.classId !== assignment.classId ||
+          item.schoolSubjectId !== assignment.schoolSubjectId,
+      ),
     });
-    setNotice(`${subject} ${isOffered ? "removed from" : "added to"} your school's offered subjects.`);
+    setNotice(`${assignment.subject} assignment removed from ${teacher.name}.`);
+  }
+
+  function toggleDraftSubject(subjectId: string) {
+    setDraftSubjectIds((current) =>
+      current.includes(subjectId)
+        ? current.filter((id) => id !== subjectId)
+        : [...current, subjectId],
+    );
+  }
+
+  function cancelSubjectChanges() {
+    setDraftSubjectIds(selectedSubjectIds);
+    setIsEditingSubjects(false);
+  }
+
+  async function confirmSubjectChanges() {
+    if (!schoolId) {
+      setSubjectLoadError("Unable to save subjects because your school ID is unavailable.");
+      return;
+    }
+
+    setIsSavingSubjects(true);
+    setSubjectLoadError("");
+    try {
+      const selectedIds = new Set(draftSubjectIds);
+      const currentIds = new Set(selectedSubjectIds);
+      const addedIds = draftSubjectIds.filter((id) => !currentIds.has(id));
+      const removedIds = selectedSubjectIds.filter((id) => !selectedIds.has(id));
+      const removedSchoolSubjectIds = schoolSubjectRows
+        .filter((row) => removedIds.includes(row.subject_id))
+        .map((row) => row.id);
+
+      if (addedIds.length > 0) {
+        const { error } = await supabase.from("School_Subjects").insert(
+          addedIds.map((subjectId) => ({
+            school_id: schoolId,
+            subject_id: subjectId,
+            added_on: new Date().toISOString(),
+          })),
+        );
+        if (error) throw error;
+      }
+
+      for (const schoolSubjectId of removedSchoolSubjectIds) {
+        const { error } = await supabase
+          .from("Teacher_Subjects")
+          .delete()
+          .eq("school_subject_id", schoolSubjectId);
+        if (error) throw error;
+      }
+
+      for (const subjectId of removedIds) {
+        const { error } = await supabase
+          .from("School_Subjects")
+          .delete()
+          .eq("school_id", schoolId)
+          .eq("subject_id", subjectId);
+        if (error) throw error;
+      }
+
+      const { data: updatedAssociations, error: updatedAssociationsError } = await supabase
+        .from("School_Subjects")
+        .select("id, subject_id")
+        .eq("school_id", schoolId);
+      if (updatedAssociationsError) throw updatedAssociationsError;
+
+      const nextSubjects = subjectRows.filter((subject) => selectedIds.has(subject.id));
+      const nextSubjectNames = nextSubjects.map((subject) => subject.name);
+      const removedSubjectNames = new Set(
+        subjectRows
+          .filter((subject) => removedIds.includes(subject.id))
+          .map((subject) => subject.name),
+      );
+      const removedAssignments = schoolWorkspace.teachers.reduce(
+        (count, teacher) =>
+          count +
+          teacher.teachingAssignments.filter((assignment) => removedSubjectNames.has(assignment.subject)).length,
+        0,
+      );
+
+      commitWorkspace({
+        ...schoolWorkspace,
+        subjects: nextSubjectNames,
+        teachers: schoolWorkspace.teachers.map((teacher) => ({
+          ...teacher,
+          teachingAssignments: teacher.teachingAssignments.filter(
+            (assignment) => !removedSubjectNames.has(assignment.subject),
+          ),
+        })),
+      });
+      setSelectedSubjectIds(draftSubjectIds);
+      setSchoolSubjectRows((updatedAssociations ?? []) as SchoolSubjectRow[]);
+      setIsEditingSubjects(false);
+      setNotice(
+        removedAssignments > 0
+          ? `Subject changes saved. ${removedAssignments} teacher assignment${removedAssignments === 1 ? " was" : "s were"} removed because the subject is no longer offered.`
+          : "Subject changes saved.",
+      );
+    } catch (error) {
+      setSubjectLoadError(error instanceof Error ? error.message : "Unable to save subject changes.");
+    } finally {
+      setIsSavingSubjects(false);
+    }
   }
 
   const teacherCount = schoolWorkspace.teachers.length;
@@ -176,19 +706,14 @@ export default function Dashboard() {
     const matchesClass =
       studentClassFilter === ""
         ? true
-        : studentClassFilter === "unassigned"
-          ? !student.className
-          : student.className === studentClassFilter;
+        : student.className === studentClassFilter;
     return matchesSearch && matchesClass;
   });
   const studentPageCount = Math.max(1, Math.ceil(filteredStudents.length / STUDENTS_PER_PAGE));
   const currentStudentPage = Math.min(studentPage, studentPageCount);
   const firstStudentIndex = (currentStudentPage - 1) * STUDENTS_PER_PAGE;
   const visibleStudents = filteredStudents.slice(firstStudentIndex, firstStudentIndex + STUDENTS_PER_PAGE);
-  const studentClassOptions = [...new Set([
-    ...availableClasses,
-    ...schoolWorkspace.students.map((student) => student.className).filter(Boolean),
-  ])];
+  const studentClassOptions = classRows.map((classRow) => classRow.name);
 
   function toggleDarkMode() {
     const nextIsDarkMode = !isDarkMode;
@@ -269,10 +794,6 @@ export default function Dashboard() {
             </button>
           </div>
         </div>
-        <p className="mt-5 rounded-xl border border-sun/70 bg-sun/20 px-4 py-3 text-sm">
-          This demo saves dashboard data in this browser. Connect a backend to sync real school, student, and teacher
-          accounts across devices.
-        </p>
         <p role="status" aria-live="polite" className={`mt-4 min-h-5 text-sm ${notice ? "font-semibold text-cobalt" : ""}`}>
           {notice}
         </p>
@@ -285,25 +806,76 @@ export default function Dashboard() {
         </div>
 
         <section className="mt-10" aria-labelledby="subjects-title">
-          <h2 id="subjects-title" className="text-xl font-bold">Subjects offered</h2>
-          <p className="mt-1 text-sm text-ink/70">
-            Select the subjects your school offers. You can change these selections anytime.
-          </p>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 id="subjects-title" className="text-xl font-bold">Subjects offered</h2>
+              <p className="mt-1 text-sm text-ink/70">
+                Choose which subjects your school offers.
+              </p>
+            </div>
+            {isEditingSubjects ? (
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={cancelSubjectChanges}
+                  disabled={isSavingSubjects}
+                  className="rounded-lg border border-line px-4 py-2 text-sm font-semibold hover:border-ink/30 disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void confirmSubjectChanges()}
+                  disabled={isSavingSubjects || isLoadingSubjects}
+                  className="rounded-lg bg-cobalt px-4 py-2 text-sm font-semibold text-white hover:bg-cobalt-dark disabled:opacity-50"
+                >
+                  {isSavingSubjects ? "Saving…" : "Confirm changes"}
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => {
+                  setDraftSubjectIds(selectedSubjectIds);
+                  setIsEditingSubjects(true);
+                }}
+                disabled={isLoadingSubjects || Boolean(subjectLoadError)}
+                className="rounded-lg border border-line px-4 py-2 text-sm font-semibold hover:border-ink/30 disabled:opacity-50"
+              >
+                Edit subjects
+              </button>
+            )}
+          </div>
+          {isLoadingSubjects && <p className="mt-4 text-sm text-ink/70">Loading subjects…</p>}
+          {subjectLoadError && (
+            <p role="alert" className="mt-4 text-sm font-medium text-danger">
+              {subjectLoadError}
+            </p>
+          )}
           <fieldset className="mt-4">
             <legend className="sr-only">Subjects your school offers</legend>
             <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-              {offeredSubjects.map((subject) => (
-                <label key={subject} className="flex cursor-pointer items-center gap-3 rounded-lg border border-line bg-white px-4 py-3 text-sm font-medium hover:border-cobalt">
+              {subjectRows.map((subject) => (
+                <label
+                  key={subject.id}
+                  className={`flex items-center gap-3 rounded-lg border border-line bg-white px-4 py-3 text-sm font-medium ${
+                    isEditingSubjects ? "cursor-pointer hover:border-cobalt" : "cursor-not-allowed opacity-75"
+                  }`}
+                >
                   <input
                     type="checkbox"
-                    checked={schoolWorkspace.subjects.includes(subject)}
-                    onChange={() => toggleSchoolSubject(subject)}
+                    checked={(isEditingSubjects ? draftSubjectIds : selectedSubjectIds).includes(subject.id)}
+                    disabled={!isEditingSubjects || isSavingSubjects}
+                    onChange={() => toggleDraftSubject(subject.id)}
                     className="size-4 accent-cobalt"
                   />
-                  {subject}
+                  {subject.name}
                 </label>
               ))}
             </div>
+            {!isLoadingSubjects && !subjectLoadError && subjectRows.length === 0 && (
+              <p className="mt-4 text-sm text-ink/70">No subjects are available in Supabase.</p>
+            )}
           </fieldset>
         </section>
 
@@ -378,7 +950,6 @@ export default function Dashboard() {
                 className="mt-1.5 h-11 w-full rounded-lg border border-line bg-white px-3 font-normal sm:w-56"
               >
                 <option value="">All classes</option>
-                <option value="unassigned">Unassigned</option>
                 {studentClassOptions.map((className) => <option key={className} value={className}>{className}</option>)}
               </select>
             </label>
@@ -411,10 +982,6 @@ export default function Dashboard() {
           </div>
           <ul className="mt-5 divide-y divide-line rounded-2xl border border-line bg-white">
             {visibleStudents.map((student) => {
-              const classChoices: string[] = [...availableClasses];
-              if (student.className && !classChoices.includes(student.className)) {
-                classChoices.push(student.className);
-              }
               return (
                 <li key={student.id} className="flex flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center sm:px-5">
                   <div className="flex min-w-0 flex-1 items-center gap-3">
@@ -436,7 +1003,7 @@ export default function Dashboard() {
                       className="h-10 rounded-lg border border-line bg-white px-3"
                     >
                       <option value="">Unassigned</option>
-                      {classChoices.map((className) => <option key={className} value={className}>{className}</option>)}
+                      {classRows.map((classRow) => <option key={classRow.id} value={classRow.name}>{classRow.name}</option>)}
                     </select>
                   </label>
                   <button
@@ -484,7 +1051,7 @@ export default function Dashboard() {
                   className="mt-1.5 h-11 w-full rounded-lg border border-line bg-white px-3 font-normal"
                 >
                   <option value="">Select a class</option>
-                  {availableClasses.map((className) => <option key={className} value={className}>{className}</option>)}
+                  {classRows.map((classRow) => <option key={classRow.id} value={classRow.id}>{classRow.name}</option>)}
                 </select>
               </label>
               <label className="text-sm font-semibold">
@@ -548,7 +1115,7 @@ export default function Dashboard() {
                     <p className="mt-1 text-sm text-ink/60">No classes or subjects assigned yet.</p>
                   ) : (
                     <ul className="mt-2 space-y-2">
-                      {teacher.teachingAssignments.map((assignment, index) => (
+                      {teacher.teachingAssignments.map((assignment) => (
                         <li
                           key={`${assignment.className}-${assignment.subject}`}
                           className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-line px-3 py-2 text-sm"
@@ -556,11 +1123,7 @@ export default function Dashboard() {
                           <span><strong>{assignment.subject}</strong> · {assignment.className}</span>
                           <button
                             type="button"
-                            onClick={() =>
-                              updatePerson("teacher", teacher.id, {
-                                teachingAssignments: teacher.teachingAssignments.filter((_, itemIndex) => itemIndex !== index),
-                              })
-                            }
+                            onClick={() => void removeTeacherAssignment(teacher, assignment)}
                             aria-label={`Remove ${assignment.subject} assignment for ${assignment.className} from ${teacher.name}`}
                             className="font-semibold text-danger hover:underline"
                           >
