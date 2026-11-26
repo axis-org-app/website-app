@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import * as api from "../lib/auth";
 import type { SchoolAccount, SignUpInput } from "../lib/auth";
 import { supabase } from "../lib/supabase";
@@ -20,6 +20,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
   const [authError, setAuthError] = useState("");
   const [schoolRegistrationError, setSchoolRegistrationError] = useState("");
+  const authStateVersion = useRef(0);
 
   useEffect(() => {
     let active = true;
@@ -28,6 +29,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
       if (!active) return;
+      const eventVersion = ++authStateVersion.current;
       if (!session) {
         setAccount(null);
         return;
@@ -40,12 +42,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           .submitPendingSchoolCreation(session.user)
           .then(() => api.schoolAccountFromUser(session.user))
           .then((schoolAccount) => {
-            if (!active) return;
+            if (!active || authStateVersion.current !== eventVersion) return;
             setAccount(schoolAccount);
             setSchoolRegistrationError("");
           })
           .catch((error: unknown) => {
-            if (active) {
+            if (active && authStateVersion.current === eventVersion) {
               setSchoolRegistrationError(
                 error instanceof Error ? error.message : "Unable to load your school details.",
               );
@@ -55,13 +57,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       registrationTimers.add(timer);
     });
 
+    const initialAuthVersion = authStateVersion.current;
     api
       .getSession()
       .then((session) => {
-        if (active) setAccount(session);
+        if (active && authStateVersion.current === initialAuthVersion) setAccount(session);
       })
       .catch((error: unknown) => {
-        if (active) setAuthError(error instanceof Error ? error.message : "Unable to load your account.");
+        if (active && authStateVersion.current === initialAuthVersion) {
+          setAuthError(error instanceof Error ? error.message : "Unable to load your account.");
+        }
       })
       .finally(() => {
         if (active) setIsLoading(false);
@@ -104,6 +109,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     logIn: async (email, password) => setAccount(await api.logIn(email, password)),
     requestPasswordReset: (email) => api.requestPasswordReset(email),
     logOut: async () => {
+      authStateVersion.current += 1;
       await api.logOut();
       setAccount(null);
     },

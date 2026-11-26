@@ -23,6 +23,7 @@ export type PersonRole = "student" | "teacher";
 
 export interface JoinRequest {
   id: string;
+  joinRequestId?: string;
   name: string;
   role: PersonRole;
   detail: string;
@@ -32,6 +33,8 @@ export interface JoinRequest {
 export interface TeachingAssignment {
   className: string;
   subject: string;
+  classId?: string;
+  schoolSubjectId?: string;
 }
 
 export interface ManagedPerson {
@@ -50,22 +53,8 @@ export interface SchoolWorkspace {
   teachers: ManagedPerson[];
 }
 
-const sampleRequests: JoinRequest[] = [
-  { id: "r1", name: "Amara Eze", role: "student", detail: "JSS 2A", requested: "10 minutes ago" },
-  { id: "r2", name: "Tunde Bakare", role: "teacher", detail: "Mathematics", requested: "35 minutes ago" },
-  { id: "r3", name: "Ngozi Obi", role: "student", detail: "SS 1B", requested: "1 hour ago" },
-  { id: "r4", name: "Ibrahim Musa", role: "student", detail: "JSS 3C", requested: "2 hours ago" },
-  { id: "r5", name: "Funke Adeyemi", role: "teacher", detail: "English Language", requested: "Yesterday" },
-];
-
-const sampleStudents: ManagedPerson[] = [
-  { id: "s1", name: "Chidi Okeke", role: "student", className: "SS 2A", teachingAssignments: [], enabled: true },
-  { id: "s2", name: "Blessing Etim", role: "student", className: "JSS 3B", teachingAssignments: [], enabled: true },
-  { id: "s3", name: "Emeka Nwosu", role: "student", className: "SS 1C", teachingAssignments: [], enabled: true },
-  { id: "s4", name: "Sadiq Lawal", role: "student", className: "JSS 2A", teachingAssignments: [], enabled: true },
-  { id: "s5", name: "Zainab Bello", role: "student", className: "SS 3B", teachingAssignments: [], enabled: true },
-  { id: "s6", name: "Kelechi Amadi", role: "student", className: "JSS 1C", teachingAssignments: [], enabled: true },
-];
+const demoRequestIds = new Set(["r1", "r2", "r3", "r4", "r5"]);
+const demoStudentIds = new Set(["s1", "s2", "s3", "s4", "s5", "s6"]);
 
 function storageKey(email: string) {
   return `komi.school-workspace:${email.trim().toLowerCase()}`;
@@ -76,8 +65,8 @@ export function getSchoolWorkspace(email: string): SchoolWorkspace {
   if (!raw) {
     const workspace: SchoolWorkspace = {
       subjects: [],
-      requests: sampleRequests.map((request) => ({ ...request })),
-      students: sampleStudents.map((student) => ({ ...student })),
+      requests: [],
+      students: [],
       teachers: [],
     };
     saveSchoolWorkspace(email, workspace);
@@ -98,10 +87,17 @@ export function getSchoolWorkspace(email: string): SchoolWorkspace {
     const normalized: SchoolWorkspace = {
       ...workspace,
       subjects: workspace.subjects.filter((subject) => subjectCatalog.has(subject)),
-      students: workspace.students.map((student) => ({
-        ...student,
-        teachingAssignments: Array.isArray(student.teachingAssignments) ? student.teachingAssignments : [],
-      })),
+      // Remove seeded demo rows from existing browser storage and discard obsolete class labels.
+      requests: workspace.requests.filter((request) => !demoRequestIds.has(request.id)),
+      students: workspace.students
+        .filter((student) => !demoStudentIds.has(student.id))
+        .map((student) => ({
+          ...student,
+          className: availableClasses.includes(student.className as (typeof availableClasses)[number])
+            ? student.className
+            : "",
+          teachingAssignments: Array.isArray(student.teachingAssignments) ? student.teachingAssignments : [],
+        })),
       teachers: workspace.teachers.map((teacher) => ({
         ...teacher,
         teachingAssignments: Array.isArray(teacher.teachingAssignments)
